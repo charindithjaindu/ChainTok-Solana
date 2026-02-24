@@ -155,7 +155,10 @@ class FeedProvider extends ChangeNotifier {
           );
         }
 
-        await wallet.signAndSendTransaction(tx);
+        await wallet.signAndSendTransaction(
+          tx,
+          connection: solana.connection,
+        );
       } catch (e) {
         // Revert on failure
         _posts[index] = post;

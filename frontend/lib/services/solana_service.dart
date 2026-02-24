@@ -18,7 +18,7 @@ class SolanaService {
 
   SolanaService() {
     _connection = web3.Connection(
-      web3.Cluster.devnet,
+      web3.Cluster(Uri.parse(AppConstants.solanaRpcUrl)),
     );
     _programId = web3.Pubkey.fromBase58(AppConstants.programId);
   }

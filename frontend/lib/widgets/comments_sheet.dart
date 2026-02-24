@@ -126,7 +126,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
               commentId: commentId,
               content: text,
             )
-            .then((tx) => wallet.signAndSendTransaction(tx))
+            .then((tx) => wallet.signAndSendTransaction(
+              tx,
+              connection: solana.connection,
+            ))
             .catchError((Object e) {
               debugPrint('Comment tx failed: $e');
               return Uint8List(0);

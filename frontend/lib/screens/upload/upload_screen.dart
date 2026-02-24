@@ -81,13 +81,34 @@ class _UploadScreenState extends State<UploadScreen> {
       const arweaveUri = 'https://arweave.net/placeholder';
 
       if (wallet.pubkey != null) {
+        // Ensure profile exists before posting
+        final profilePda = solana.findProfilePda(wallet.pubkey!);
+        final hasProfile = await solana.accountExists(profilePda);
+        if (!hasProfile) {
+          final profileTx = await solana.buildCreateProfile(
+            authority: wallet.pubkey!,
+            displayName: wallet.walletShort,
+            bio: '',
+            pfpUri: '',
+          );
+          await wallet.signAndSendTransaction(
+            profileTx,
+            connection: solana.connection,
+          );
+          // Wait for confirmation
+          await Future.delayed(const Duration(seconds: 2));
+        }
+
         final tx = await solana.buildCreatePost(
           creator: wallet.pubkey!,
           postId: postId,
           arweaveUri: arweaveUri,
           caption: _captionController.text.trim(),
         );
-        await wallet.signAndSendTransaction(tx);
+        await wallet.signAndSendTransaction(
+          tx,
+          connection: solana.connection,
+        );
       }
 
       if (mounted) {

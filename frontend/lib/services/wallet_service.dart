@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -113,10 +114,11 @@ class WalletService extends ChangeNotifier {
   // ── Sign & send transactions via MWA ──────────────────────────────────
 
   /// Takes **serialized** unsigned transactions, opens the wallet for signing,
-  /// and returns the transaction signature(s).
+  /// then submits via the provided RPC connection. Returns the tx signature(s).
   Future<List<Uint8List>> signAndSendTransactions(
-    List<Uint8List> serializedTransactions,
-  ) async {
+    List<Uint8List> serializedTransactions, {
+    web3.Connection? connection,
+  }) async {
     if (_mode == WalletMode.demo) {
       // In demo mode we can't actually sign — return fake sigs
       return serializedTransactions
@@ -146,21 +148,47 @@ class WalletService extends ChangeNotifier {
         await _persist();
       }
 
-      final result = await client.signAndSendTransactions(
+      // Sign only — don't let the wallet submit
+      final signResult = await client.signTransactions(
         transactions: serializedTransactions,
       );
 
-      return result.signatures;
-    } finally {
+      final signedTxs = signResult.signedPayloads;
+
       await session.close();
+
+      // Submit signed transactions ourselves via our RPC
+      if (connection != null) {
+        for (final signedTx in signedTxs) {
+          try {
+            final b64 = base64.encode(signedTx);
+            final sig = await connection.sendSignedTransactionRaw(b64);
+            debugPrint('Transaction submitted: ${sig.result}');
+          } catch (e) {
+            debugPrint('Transaction submission error: $e');
+            rethrow;
+          }
+        }
+      }
+
+      return signedTxs;
+    } catch (e) {
+      try { await session.close(); } catch (_) {}
+      rethrow;
     }
   }
 
-  /// Convenience: serialize a [web3.Transaction], sign+send via MWA, return
-  /// the first signature bytes.
-  Future<Uint8List> signAndSendTransaction(web3.Transaction tx) async {
+  /// Convenience: serialize a [web3.Transaction], sign via MWA, submit via
+  /// RPC, return the first signature bytes.
+  Future<Uint8List> signAndSendTransaction(
+    web3.Transaction tx, {
+    web3.Connection? connection,
+  }) async {
     final serialized = tx.serialize().asUint8List();
-    final sigs = await signAndSendTransactions([serialized]);
+    final sigs = await signAndSendTransactions(
+      [serialized],
+      connection: connection,
+    );
     if (sigs.isEmpty) throw WalletException('No signature returned');
     return sigs.first;
   }
