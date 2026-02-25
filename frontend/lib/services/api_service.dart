@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../config/constants.dart';
 import '../models/post.dart';
@@ -68,6 +69,30 @@ class ApiService {
     return data.map((json) => Post.fromJson(json)).toList();
   }
 
+  // ── Upload video/media ─────────────────────────────────────────────
+
+  /// Upload a video file to the backend and return the URL it's served at.
+  /// Returns the URL string on success (e.g. http://10.0.2.2:3000/uploads/abc.mp4).
+  Future<String> uploadVideo(File file) async {
+    final uri = Uri.parse('$_baseUrl/upload');
+    final request = http.MultipartRequest('POST', uri);
+    request.files.add(
+      await http.MultipartFile.fromPath('file', file.path),
+    );
+    final streamed = await request.send().timeout(
+      const Duration(minutes: 5),
+    );
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      throw ApiException('Upload failed: ${response.statusCode}');
+    }
+    final data = jsonDecode(response.body);
+    if (data['error'] != null) {
+      throw ApiException('Upload error: ${data['error']}');
+    }
+    return data['url'] as String;
+  }
+
   // ── Health ─────────────────────────────────────────────────────────────
 
   Future<bool> healthCheck() async {
@@ -79,6 +104,19 @@ class ApiService {
       return response.statusCode == 200;
     } catch (_) {
       return false;
+    }
+  }
+
+  // ── Sync (poll devnet → index into backend DB) ────────────────────────
+
+  /// Triggers the backend to pull recent on-chain transactions and index them.
+  /// Call after any on-chain write (post, like, comment) to update the feed.
+  Future<void> syncFromChain() async {
+    try {
+      final uri = Uri.parse('$_baseUrl/sync');
+      await _client.post(uri).timeout(const Duration(seconds: 30));
+    } catch (_) {
+      // Best-effort sync — don't crash the app if it fails
     }
   }
 

@@ -8,9 +8,9 @@ class AppConstants {
   static const String apiBaseUrl = 'http://10.0.2.2:3000';
 
   // ── Solana ─────────────────────────────────────────────────────────────
-  /// Devnet RPC — program is deployed here.
+  /// RPC via backend proxy (avoids emulator DNS issues with devnet).
   static const String solanaRpcUrl =
-      'https://api.devnet.solana.com';
+      'http://10.0.2.2:3000/rpc';
   static const String programId =
       'ArteCcRQqj14sy5BaS7iHDU8EmYURYWFCLh4opB97vS2';
 

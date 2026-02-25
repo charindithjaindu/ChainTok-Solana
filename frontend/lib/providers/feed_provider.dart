@@ -159,6 +159,11 @@ class FeedProvider extends ChangeNotifier {
           tx,
           connection: solana.connection,
         );
+
+        // Sync backend from chain so like counts update
+        await Future.delayed(const Duration(seconds: 2));
+        await _api.syncFromChain();
+        await loadFeed();
       } catch (e) {
         // Revert on failure
         _posts[index] = post;

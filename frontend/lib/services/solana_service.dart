@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart';
 import 'package:solana_web3/solana_web3.dart' as web3;
 import 'package:solana_web3/programs.dart' show SystemProgram;
@@ -273,8 +274,10 @@ class SolanaService {
   Future<bool> accountExists(web3.Pubkey pubkey) async {
     try {
       final info = await _connection.getAccountInfo(pubkey);
+      debugPrint('accountExists($pubkey): info=${info != null}');
       return info != null;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('accountExists($pubkey) error: $e');
       return false;
     }
   }

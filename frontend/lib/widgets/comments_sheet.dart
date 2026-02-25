@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -130,9 +128,13 @@ class _CommentsSheetState extends State<CommentsSheet> {
               tx,
               connection: solana.connection,
             ))
+            .then((_) async {
+              // Sync backend from chain so comments appear
+              await Future.delayed(const Duration(seconds: 2));
+              await ApiService().syncFromChain();
+            })
             .catchError((Object e) {
               debugPrint('Comment tx failed: $e');
-              return Uint8List(0);
             });
       }
     }

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -9,6 +11,8 @@ import '../../config/theme.dart';
 import '../../config/constants.dart';
 import '../../services/wallet_service.dart';
 import '../../services/solana_service.dart';
+import '../../services/api_service.dart';
+import '../../providers/feed_provider.dart';
 
 class UploadScreen extends StatefulWidget {
   const UploadScreen({super.key});
@@ -68,35 +72,44 @@ class _UploadScreenState extends State<UploadScreen> {
     });
 
     try {
-      // Step 1: Upload video to Arweave (simulated for MVP)
-      for (int i = 0; i <= 100; i += 10) {
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (mounted) setState(() => _uploadProgress = i / 100);
-      }
+      // Step 1: Upload video to backend storage
+      final api = ApiService();
+      if (mounted) setState(() => _uploadProgress = 0.1);
+
+      final videoUrl = await api.uploadVideo(File(_videoFile!.path));
+
+      if (mounted) setState(() => _uploadProgress = 0.6);
 
       // Step 2: Create post on-chain
       final solana = context.read<SolanaService>();
       final postId = DateTime.now().millisecondsSinceEpoch;
-      // In production, arweaveUri would come from the Arweave upload
-      const arweaveUri = 'https://arweave.net/placeholder';
+      // Use the uploaded video path as the arweave_uri field
+      // videoUrl is a relative path like /uploads/abc.mp4
+      final arweaveUri = '${AppConstants.apiBaseUrl}$videoUrl';
 
       if (wallet.pubkey != null) {
-        // Ensure profile exists before posting
-        final profilePda = solana.findProfilePda(wallet.pubkey!);
-        final hasProfile = await solana.accountExists(profilePda);
-        if (!hasProfile) {
-          final profileTx = await solana.buildCreateProfile(
-            authority: wallet.pubkey!,
-            displayName: wallet.walletShort,
-            bio: '',
-            pfpUri: '',
-          );
-          await wallet.signAndSendTransaction(
-            profileTx,
-            connection: solana.connection,
-          );
-          // Wait for confirmation
-          await Future.delayed(const Duration(seconds: 2));
+        // Ensure profile exists before posting — if creation fails
+        // (e.g. profile already exists on-chain), just continue.
+        try {
+          final profilePda = solana.findProfilePda(wallet.pubkey!);
+          final hasProfile = await solana.accountExists(profilePda);
+          if (!hasProfile) {
+            final profileTx = await solana.buildCreateProfile(
+              authority: wallet.pubkey!,
+              displayName: wallet.walletShort,
+              bio: '',
+              pfpUri: '',
+            );
+            await wallet.signAndSendTransaction(
+              profileTx,
+              connection: solana.connection,
+            );
+            // Wait for confirmation
+            await Future.delayed(const Duration(seconds: 2));
+          }
+        } catch (e) {
+          // Profile likely already exists (error 0x0 = AccountAlreadyInUse)
+          debugPrint('Profile creation skipped/failed: $e');
         }
 
         final tx = await solana.buildCreatePost(
@@ -109,9 +122,22 @@ class _UploadScreenState extends State<UploadScreen> {
           tx,
           connection: solana.connection,
         );
+
+        if (mounted) setState(() => _uploadProgress = 0.9);
+
+        // Sync backend from chain so the post appears in the feed
+        await Future.delayed(const Duration(seconds: 2));
+        await api.syncFromChain();
+
+        if (mounted) setState(() => _uploadProgress = 1.0);
       }
 
       if (mounted) {
+        // Refresh the feed after sync
+        try {
+          context.read<FeedProvider>().loadFeed();
+        } catch (_) {}
+
         setState(() {
           _isUploading = false;
           _videoFile = null;
