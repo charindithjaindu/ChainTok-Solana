@@ -24,6 +24,9 @@ export interface Comment {
 export interface Profile {
   pubkey: string;
   authority: string;
+  display_name: string;
+  bio: string;
+  pfp_uri: string;
   created_at: number;
 }
 

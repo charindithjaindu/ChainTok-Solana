@@ -15,6 +15,7 @@ import {
   getComments,
   upsertProfile,
   getProfileByAuthority,
+  updateProfileMeta,
 } from "./db";
 import { parseWebhookEvents } from "./webhook";
 import type { WebhookPayload } from "./types";
@@ -223,6 +224,37 @@ const app = new Elysia()
     }
   )
 
+  // ── Update User Profile (off-chain cache) ──
+  .put(
+    "/user/:pubkey/profile",
+    ({ params, body, set }) => {
+      try {
+        const { display_name, bio, pfp_uri } = body as {
+          display_name?: string;
+          bio?: string;
+          pfp_uri?: string;
+        };
+
+        updateProfileMeta(params.pubkey, {
+          display_name: display_name ?? '',
+          bio: bio ?? '',
+          pfp_uri: pfp_uri ?? '',
+        });
+
+        const profile = getProfileByAuthority(params.pubkey);
+        return profile ?? { ok: true };
+      } catch (err) {
+        console.error("[Profile Update] Error:", err);
+        set.status = 500;
+        return { error: "Failed to update profile" };
+      }
+    },
+    {
+      params: t.Object({ pubkey: t.String() }),
+      detail: { description: "Update user profile metadata (off-chain cache)" },
+    }
+  )
+
   // ── Solana RPC Proxy (for emulator DNS workaround) ──
   .post(
     "/rpc",
@@ -352,21 +384,45 @@ const app = new Elysia()
           return { error: "No file provided" };
         }
 
+        // Determine effective MIME type (Android image_picker often sends application/octet-stream)
+        let mimeType = file.type;
+        const originalName = (file as any).name ?? "";
+        const extMap: Record<string, string> = {
+          ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+          ".3gp": "video/3gpp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".png": "image/png", ".gif": "image/gif",
+        };
+
+        // Fallback: infer MIME from original filename if type is generic/missing
+        if (!mimeType || mimeType === "application/octet-stream") {
+          const nameLower = originalName.toLowerCase();
+          for (const [ext, mime] of Object.entries(extMap)) {
+            if (nameLower.endsWith(ext)) {
+              mimeType = mime;
+              break;
+            }
+          }
+        }
+
         // Validate content type
         const allowed = ["video/mp4", "video/quicktime", "video/webm", "video/3gpp", "image/jpeg", "image/png", "image/gif"];
-        if (!allowed.some((t) => file.type.startsWith(t.split("/")[0]))) {
-          return { error: `Unsupported file type: ${file.type}` };
+        if (!allowed.includes(mimeType) && !allowed.some((t) => mimeType.startsWith(t.split("/")[0]))) {
+          if (mimeType !== "application/octet-stream") {
+            return { error: `Unsupported file type: ${mimeType}` };
+          }
+          // Default to video/mp4 for octet-stream (most common from Android video pickers)
+          mimeType = "video/mp4";
         }
 
         // Generate unique filename
-        const ext = file.type.includes("mp4") ? ".mp4"
-          : file.type.includes("quicktime") ? ".mov"
-          : file.type.includes("webm") ? ".webm"
-          : file.type.includes("3gpp") ? ".3gp"
-          : file.type.includes("jpeg") ? ".jpg"
-          : file.type.includes("png") ? ".png"
-          : file.type.includes("gif") ? ".gif"
-          : "";
+        const ext = mimeType.includes("mp4") ? ".mp4"
+          : mimeType.includes("quicktime") ? ".mov"
+            : mimeType.includes("webm") ? ".webm"
+              : mimeType.includes("3gpp") ? ".3gp"
+                : mimeType.includes("jpeg") ? ".jpg"
+                  : mimeType.includes("png") ? ".png"
+                    : mimeType.includes("gif") ? ".gif"
+                      : ".jpg";
         const filename = `${randomUUID()}${ext}`;
         const filepath = path.join(UPLOADS_DIR, filename);
 
@@ -426,6 +482,7 @@ console.log(`   Post:       GET  /post/:pubkey`);
 console.log(`   Comments:   GET  /post/:pubkey/comments`);
 console.log(`   User Posts: GET  /user/:pubkey/posts`);
 console.log(`   Profile:    GET  /user/:pubkey/profile`);
+console.log(`   Profile:    PUT  /user/:pubkey/profile`);
 console.log(`   Webhook:    POST /webhook`);
 console.log(`   Upload:     POST /upload`);
 console.log(`   Files:      GET  /uploads/:filename`);

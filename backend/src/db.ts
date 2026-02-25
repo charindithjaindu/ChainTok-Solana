@@ -47,11 +47,23 @@ db.run(
 
 db.run(`
   CREATE TABLE IF NOT EXISTS profiles (
-    pubkey    TEXT PRIMARY KEY,
-    authority TEXT NOT NULL UNIQUE,
-    created_at INTEGER NOT NULL
+    pubkey       TEXT PRIMARY KEY,
+    authority    TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    bio          TEXT NOT NULL DEFAULT '',
+    pfp_uri      TEXT NOT NULL DEFAULT '',
+    created_at   INTEGER NOT NULL
   )
 `);
+
+// Migrate existing DBs: add new columns if missing
+for (const col of ['display_name', 'bio', 'pfp_uri']) {
+  try {
+    db.run(`ALTER TABLE profiles ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
+  } catch (_) {
+    // Column already exists
+  }
+}
 
 console.log("✅ Database initialized at ./data/chainTok.db");
 
@@ -102,8 +114,21 @@ const getCommentsStmt = db.prepare(
 
 // Profiles
 const insertProfileStmt = db.prepare(`
-  INSERT OR IGNORE INTO profiles (pubkey, authority, created_at)
-  VALUES ($pubkey, $authority, $created_at)
+  INSERT INTO profiles (pubkey, authority, display_name, bio, pfp_uri, created_at)
+  VALUES ($pubkey, $authority, $display_name, $bio, $pfp_uri, $created_at)
+  ON CONFLICT(pubkey) DO UPDATE SET
+    display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE profiles.display_name END,
+    bio = CASE WHEN excluded.bio != '' THEN excluded.bio ELSE profiles.bio END,
+    pfp_uri = CASE WHEN excluded.pfp_uri != '' THEN excluded.pfp_uri ELSE profiles.pfp_uri END
+`);
+
+const updateProfileMetaStmt = db.prepare(`
+  INSERT INTO profiles (pubkey, authority, display_name, bio, pfp_uri, created_at)
+  VALUES ($pubkey, $authority, $display_name, $bio, $pfp_uri, $created_at)
+  ON CONFLICT(authority) DO UPDATE SET
+    display_name = $display_name,
+    bio = $bio,
+    pfp_uri = $pfp_uri
 `);
 
 const getProfileByAuthorityStmt = db.prepare(
@@ -206,11 +231,33 @@ export function getComments(
 export function upsertProfile(profile: {
   pubkey: string;
   authority: string;
+  display_name?: string;
+  bio?: string;
+  pfp_uri?: string;
 }): void {
   const now = Math.floor(Date.now() / 1000);
   insertProfileStmt.run({
     $pubkey: profile.pubkey,
     $authority: profile.authority,
+    $display_name: profile.display_name ?? '',
+    $bio: profile.bio ?? '',
+    $pfp_uri: profile.pfp_uri ?? '',
+    $created_at: now,
+  });
+}
+
+export function updateProfileMeta(authority: string, meta: {
+  display_name: string;
+  bio: string;
+  pfp_uri: string;
+}): void {
+  const now = Math.floor(Date.now() / 1000);
+  updateProfileMetaStmt.run({
+    $pubkey: '',
+    $authority: authority,
+    $display_name: meta.display_name,
+    $bio: meta.bio,
+    $pfp_uri: meta.pfp_uri,
     $created_at: now,
   });
 }

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../config/constants.dart';
 import '../models/post.dart';
 import '../models/comment.dart';
+import '../models/user_profile.dart';
 
 /// Service for communicating with the ElysiaJS backend (read layer).
 class ApiService {
@@ -81,6 +82,71 @@ class ApiService {
     );
     final streamed = await request.send().timeout(
       const Duration(minutes: 5),
+    );
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      throw ApiException('Upload failed: ${response.statusCode}');
+    }
+    final data = jsonDecode(response.body);
+    if (data['error'] != null) {
+      throw ApiException('Upload error: ${data['error']}');
+    }
+    return data['url'] as String;
+  }
+
+  // ── User Profile ──────────────────────────────────────────────────────
+
+  /// Fetch a user's profile from the backend cache.
+  Future<UserProfile?> getProfile(String walletPubkey) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/user/$walletPubkey/profile');
+      final response = await _client.get(uri).timeout(
+        const Duration(seconds: 5),
+      );
+      if (response.statusCode == 404) return null;
+      if (response.statusCode != 200) return null;
+      return UserProfile.fromJson(jsonDecode(response.body));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Update a user's profile metadata in the backend cache.
+  Future<UserProfile?> updateProfile(
+    String walletPubkey, {
+    required String displayName,
+    required String bio,
+    required String pfpUri,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/user/$walletPubkey/profile');
+    final response = await _client.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'display_name': displayName,
+        'bio': bio,
+        'pfp_uri': pfpUri,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to update profile: ${response.statusCode}');
+    }
+    final data = jsonDecode(response.body);
+    if (data['error'] != null) return null;
+    return UserProfile.fromJson(data);
+  }
+
+  // ── Upload profile picture ─────────────────────────────────────────
+
+  /// Upload a profile picture and return the relative URL path.
+  Future<String> uploadProfilePicture(File file) async {
+    final uri = Uri.parse('$_baseUrl/upload');
+    final request = http.MultipartRequest('POST', uri);
+    request.files.add(
+      await http.MultipartFile.fromPath('file', file.path),
+    );
+    final streamed = await request.send().timeout(
+      const Duration(minutes: 2),
     );
     final response = await http.Response.fromStream(streamed);
     if (response.statusCode != 200) {
