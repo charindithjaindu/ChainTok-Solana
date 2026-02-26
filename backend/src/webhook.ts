@@ -8,6 +8,10 @@ import type {
   PostLikedEvent,
   PostUnlikedEvent,
   CommentCreatedEvent,
+  ProfileUpdatedEvent,
+  UserFollowedEvent,
+  UserUnfollowedEvent,
+  TipSentEvent,
 } from "./types";
 import { PROGRAM_ID } from "./types";
 
@@ -29,6 +33,10 @@ const DISC = {
   PostLiked: eventDiscriminator("PostLiked"),
   PostUnliked: eventDiscriminator("PostUnliked"),
   CommentCreated: eventDiscriminator("CommentCreated"),
+  ProfileUpdated: eventDiscriminator("ProfileUpdated"),
+  UserFollowed: eventDiscriminator("UserFollowed"),
+  UserUnfollowed: eventDiscriminator("UserUnfollowed"),
+  TipSent: eventDiscriminator("TipSent"),
 } as const;
 
 // ─── Borsh Decoding Helpers ─────────────────────────────────────────
@@ -158,6 +166,37 @@ function parseCommentCreated(buf: Buffer, off: number): CommentCreatedEvent {
   return { type: "CommentCreated", commentPubkey, postPubkey, author, content, timestamp };
 }
 
+function parseProfileUpdated(buf: Buffer, off: number): ProfileUpdatedEvent {
+  let profilePubkey: string, authority: string;
+  [profilePubkey, off] = readPubkey(buf, off);
+  [authority, off] = readPubkey(buf, off);
+  return { type: "ProfileUpdated", profilePubkey, authority };
+}
+
+function parseUserFollowed(buf: Buffer, off: number): UserFollowedEvent {
+  let follower: string, following: string, timestamp: number;
+  [follower, off] = readPubkey(buf, off);
+  [following, off] = readPubkey(buf, off);
+  [timestamp, off] = readI64(buf, off);
+  return { type: "UserFollowed", follower, following, timestamp };
+}
+
+function parseUserUnfollowed(buf: Buffer, off: number): UserUnfollowedEvent {
+  let follower: string, following: string;
+  [follower, off] = readPubkey(buf, off);
+  [following, off] = readPubkey(buf, off);
+  return { type: "UserUnfollowed", follower, following };
+}
+
+function parseTipSent(buf: Buffer, off: number): TipSentEvent {
+  let tipper: string, creator: string, amountLamports: number, postPubkey: string;
+  [tipper, off] = readPubkey(buf, off);
+  [creator, off] = readPubkey(buf, off);
+  [amountLamports, off] = readU64(buf, off);
+  [postPubkey, off] = readPubkey(buf, off);
+  return { type: "TipSent", tipper, creator, amountLamports, postPubkey };
+}
+
 // ─── Main Parser ────────────────────────────────────────────────────
 
 const PROGRAM_DATA_PREFIX = "Program data: ";
@@ -207,6 +246,14 @@ export function parseWebhookEvents(
           events.push(parsePostUnliked(buf, dataOffset));
         } else if (disc.equals(DISC.CommentCreated)) {
           events.push(parseCommentCreated(buf, dataOffset));
+        } else if (disc.equals(DISC.ProfileUpdated)) {
+          events.push(parseProfileUpdated(buf, dataOffset));
+        } else if (disc.equals(DISC.UserFollowed)) {
+          events.push(parseUserFollowed(buf, dataOffset));
+        } else if (disc.equals(DISC.UserUnfollowed)) {
+          events.push(parseUserUnfollowed(buf, dataOffset));
+        } else if (disc.equals(DISC.TipSent)) {
+          events.push(parseTipSent(buf, dataOffset));
         }
       } catch (err) {
         console.warn("[Webhook] Failed to decode event:", err);

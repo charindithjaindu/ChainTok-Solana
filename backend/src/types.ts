@@ -93,10 +93,41 @@ export interface CommentCreatedEvent {
   timestamp: number;
 }
 
+export interface ProfileUpdatedEvent {
+  type: "ProfileUpdated";
+  profilePubkey: string;
+  authority: string;
+}
+
+export interface UserFollowedEvent {
+  type: "UserFollowed";
+  follower: string;
+  following: string;
+  timestamp: number;
+}
+
+export interface UserUnfollowedEvent {
+  type: "UserUnfollowed";
+  follower: string;
+  following: string;
+}
+
+export interface TipSentEvent {
+  type: "TipSent";
+  tipper: string;
+  creator: string;
+  amountLamports: number;
+  postPubkey: string;
+}
+
 export type ChainTokEvent =
   | ProfileCreatedEvent
   | PostCreatedEvent
   | PostDeletedEvent
   | PostLikedEvent
   | PostUnlikedEvent
-  | CommentCreatedEvent;
+  | CommentCreatedEvent
+  | ProfileUpdatedEvent
+  | UserFollowedEvent
+  | UserUnfollowedEvent
+  | TipSentEvent;

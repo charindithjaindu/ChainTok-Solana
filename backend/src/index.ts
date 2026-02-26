@@ -10,12 +10,26 @@ import {
   setLikeCount,
   insertComment,
   getFeed,
+  getFollowingFeed,
   getPost,
   getPostsByCreator,
   getComments,
   upsertProfile,
   getProfileByAuthority,
   updateProfileMeta,
+  recordLike,
+  removeLike,
+  getLikedPostPubkeys,
+  followUser,
+  unfollowUser,
+  isFollowingUser,
+  getFollowerCount,
+  getFollowingCount,
+  getFollowers,
+  getFollowingList,
+  recordTip,
+  getTotalTips,
+  getTipsForUser,
 } from "./db";
 import { parseWebhookEvents } from "./webhook";
 import type { WebhookPayload } from "./types";
@@ -96,11 +110,13 @@ const app = new Elysia()
 
             case "PostLiked":
               setLikeCount(event.postPubkey, event.newLikeCount);
+              recordLike(event.postPubkey, event.liker);
               likesProcessed++;
               break;
 
             case "PostUnliked":
               setLikeCount(event.postPubkey, event.newLikeCount);
+              removeLike(event.postPubkey, event.liker);
               likesProcessed++;
               break;
 
@@ -113,6 +129,28 @@ const app = new Elysia()
                 timestamp: event.timestamp,
               });
               commentsCreated++;
+              break;
+
+            case "ProfileUpdated":
+              console.log(`[Webhook] Profile updated: ${event.profilePubkey}`);
+              break;
+
+            case "UserFollowed":
+              followUser(event.follower, event.following);
+              break;
+
+            case "UserUnfollowed":
+              unfollowUser(event.follower, event.following);
+              break;
+
+            case "TipSent":
+              recordTip({
+                sender: event.tipper,
+                receiver: event.creator,
+                amountSol: event.amountLamports / 1_000_000_000,
+                postPubkey: event.postPubkey,
+                signature: "",
+              });
               break;
           }
         }
@@ -136,12 +174,26 @@ const app = new Elysia()
   .get(
     "/feed",
     ({ query }) => {
-      const sort =
-        query.sort === "hot" ? ("hot" as const) : ("latest" as const);
+      const sort = (query.sort ?? "latest") as string;
       const limit = Math.min(Math.max(parseInt(query.limit ?? "20"), 1), 100);
       const offset = Math.max(parseInt(query.offset ?? "0"), 0);
+      const viewer = query.viewer ?? "";
 
-      const posts = getFeed(sort, limit, offset);
+      let posts: any[];
+      if (sort === "following" && viewer) {
+        posts = getFollowingFeed(viewer, limit, offset);
+      } else {
+        const feedSort = sort === "hot" || sort === "foryou" ? "hot" as const : "latest" as const;
+        posts = getFeed(feedSort, limit, offset);
+      }
+
+      // Enrich with isLiked if viewer is provided
+      if (viewer && posts.length > 0) {
+        const pubkeys = posts.map((p: any) => p.pubkey);
+        const likedSet = getLikedPostPubkeys(pubkeys, viewer);
+        posts = posts.map((p: any) => ({ ...p, is_liked: likedSet.has(p.pubkey) }));
+      }
+
       return posts;
     },
     {
@@ -149,24 +201,31 @@ const app = new Elysia()
         sort: t.Optional(t.String()),
         limit: t.Optional(t.String()),
         offset: t.Optional(t.String()),
+        viewer: t.Optional(t.String()),
       }),
-      detail: { description: "Get post feed" },
+      detail: { description: "Get post feed (sort: latest|hot|foryou|following)" },
     }
   )
 
   // ── Single Post ──
   .get(
     "/post/:pubkey",
-    ({ params, set }) => {
+    ({ params, query, set }) => {
       const post = getPost(params.pubkey);
       if (!post) {
         set.status = 404;
         return { error: "Post not found" };
       }
+      const viewer = query?.viewer ?? "";
+      if (viewer) {
+        const likedSet = getLikedPostPubkeys([post.pubkey], viewer);
+        return { ...post, is_liked: likedSet.has(post.pubkey) };
+      }
       return post;
     },
     {
       params: t.Object({ pubkey: t.String() }),
+      query: t.Object({ viewer: t.Optional(t.String()) }),
       detail: { description: "Get single post by pubkey" },
     }
   )
@@ -210,16 +269,22 @@ const app = new Elysia()
   // ── User Profile ──
   .get(
     "/user/:pubkey/profile",
-    ({ params, set }) => {
+    ({ params, query, set }) => {
       const profile = getProfileByAuthority(params.pubkey);
       if (!profile) {
         set.status = 404;
         return { error: "Profile not found" };
       }
-      return profile;
+      const viewer = query?.viewer ?? "";
+      const follower_count = getFollowerCount(params.pubkey);
+      const following_count = getFollowingCount(params.pubkey);
+      const total_tips = getTotalTips(params.pubkey);
+      const is_following = viewer ? isFollowingUser(viewer, params.pubkey) : false;
+      return { ...profile, follower_count, following_count, total_tips, is_following };
     },
     {
       params: t.Object({ pubkey: t.String() }),
+      query: t.Object({ viewer: t.Optional(t.String()) }),
       detail: { description: "Get profile by wallet authority pubkey" },
     }
   )
@@ -227,8 +292,15 @@ const app = new Elysia()
   // ── Update User Profile (off-chain cache) ──
   .put(
     "/user/:pubkey/profile",
-    ({ params, body, set }) => {
+    ({ params, body, headers, set }) => {
       try {
+        // Simple auth: x-wallet-address header must match the pubkey
+        const walletAddr = headers["x-wallet-address"] ?? "";
+        if (walletAddr !== params.pubkey) {
+          set.status = 403;
+          return { error: "Forbidden: wallet address mismatch" };
+        }
+
         const { display_name, bio, pfp_uri } = body as {
           display_name?: string;
           bio?: string;
@@ -252,6 +324,133 @@ const app = new Elysia()
     {
       params: t.Object({ pubkey: t.String() }),
       detail: { description: "Update user profile metadata (off-chain cache)" },
+    }
+  )
+
+  // ── Follow User ──
+  .post(
+    "/user/:pubkey/follow",
+    ({ params, headers, set }) => {
+      const follower = headers["x-wallet-address"] ?? "";
+      if (!follower) {
+        set.status = 401;
+        return { error: "Missing x-wallet-address header" };
+      }
+      if (follower === params.pubkey) {
+        set.status = 400;
+        return { error: "Cannot follow yourself" };
+      }
+      followUser(follower, params.pubkey);
+      return { ok: true, follower_count: getFollowerCount(params.pubkey) };
+    },
+    {
+      params: t.Object({ pubkey: t.String() }),
+      detail: { description: "Follow a user" },
+    }
+  )
+
+  // ── Unfollow User ──
+  .delete(
+    "/user/:pubkey/follow",
+    ({ params, headers, set }) => {
+      const follower = headers["x-wallet-address"] ?? "";
+      if (!follower) {
+        set.status = 401;
+        return { error: "Missing x-wallet-address header" };
+      }
+      unfollowUser(follower, params.pubkey);
+      return { ok: true, follower_count: getFollowerCount(params.pubkey) };
+    },
+    {
+      params: t.Object({ pubkey: t.String() }),
+      detail: { description: "Unfollow a user" },
+    }
+  )
+
+  // ── Get Followers ──
+  .get(
+    "/user/:pubkey/followers",
+    ({ params, query }) => {
+      const limit = Math.min(Math.max(parseInt(query.limit ?? "50"), 1), 200);
+      const offset = Math.max(parseInt(query.offset ?? "0"), 0);
+      return {
+        followers: getFollowers(params.pubkey, limit, offset),
+        count: getFollowerCount(params.pubkey),
+      };
+    },
+    {
+      params: t.Object({ pubkey: t.String() }),
+      query: t.Object({ limit: t.Optional(t.String()), offset: t.Optional(t.String()) }),
+      detail: { description: "Get followers for a user" },
+    }
+  )
+
+  // ── Get Following ──
+  .get(
+    "/user/:pubkey/following",
+    ({ params, query }) => {
+      const limit = Math.min(Math.max(parseInt(query.limit ?? "50"), 1), 200);
+      const offset = Math.max(parseInt(query.offset ?? "0"), 0);
+      return {
+        following: getFollowingList(params.pubkey, limit, offset),
+        count: getFollowingCount(params.pubkey),
+      };
+    },
+    {
+      params: t.Object({ pubkey: t.String() }),
+      query: t.Object({ limit: t.Optional(t.String()), offset: t.Optional(t.String()) }),
+      detail: { description: "Get users that this user follows" },
+    }
+  )
+
+  // ── Record Tip ──
+  .post(
+    "/tip",
+    ({ body, headers, set }) => {
+      const sender = headers["x-wallet-address"] ?? "";
+      if (!sender) {
+        set.status = 401;
+        return { error: "Missing x-wallet-address header" };
+      }
+      const { receiver, amount_sol, post_pubkey, signature } = body as {
+        receiver: string;
+        amount_sol: number;
+        post_pubkey?: string;
+        signature: string;
+      };
+      if (!receiver || !amount_sol || !signature) {
+        set.status = 400;
+        return { error: "Missing required fields: receiver, amount_sol, signature" };
+      }
+      recordTip({
+        sender,
+        receiver,
+        amountSol: amount_sol,
+        postPubkey: post_pubkey ?? "",
+        signature,
+      });
+      return { ok: true, total_tips: getTotalTips(receiver) };
+    },
+    {
+      detail: { description: "Record a tip transaction" },
+    }
+  )
+
+  // ── Get User Tips ──
+  .get(
+    "/user/:pubkey/tips",
+    ({ params, query }) => {
+      const limit = Math.min(Math.max(parseInt(query.limit ?? "50"), 1), 200);
+      const offset = Math.max(parseInt(query.offset ?? "0"), 0);
+      return {
+        tips: getTipsForUser(params.pubkey, limit, offset),
+        total: getTotalTips(params.pubkey),
+      };
+    },
+    {
+      params: t.Object({ pubkey: t.String() }),
+      query: t.Object({ limit: t.Optional(t.String()), offset: t.Optional(t.String()) }),
+      detail: { description: "Get tips received by a user" },
     }
   )
 
@@ -349,12 +548,25 @@ const app = new Elysia()
                 break;
               case "PostLiked":
                 setLikeCount(event.postPubkey, event.newLikeCount);
+                recordLike(event.postPubkey, event.liker);
                 break;
               case "PostUnliked":
                 setLikeCount(event.postPubkey, event.newLikeCount);
+                removeLike(event.postPubkey, event.liker);
                 break;
               case "CommentCreated":
                 insertComment({ pubkey: event.commentPubkey, postPubkey: event.postPubkey, author: event.author, content: event.content, timestamp: event.timestamp });
+                break;
+              case "ProfileUpdated":
+                break;
+              case "UserFollowed":
+                followUser(event.follower, event.following);
+                break;
+              case "UserUnfollowed":
+                unfollowUser(event.follower, event.following);
+                break;
+              case "TipSent":
+                recordTip({ sender: event.tipper, receiver: event.creator, amountSol: event.amountLamports / 1_000_000_000, postPubkey: event.postPubkey, signature: "" });
                 break;
             }
           }
@@ -407,11 +619,12 @@ const app = new Elysia()
         // Validate content type
         const allowed = ["video/mp4", "video/quicktime", "video/webm", "video/3gpp", "image/jpeg", "image/png", "image/gif"];
         if (!allowed.includes(mimeType) && !allowed.some((t) => mimeType.startsWith(t.split("/")[0]))) {
+          // Last resort: accept if it looks like an image/video based on magic bytes later; for MVP just allow octet-stream
           if (mimeType !== "application/octet-stream") {
             return { error: `Unsupported file type: ${mimeType}` };
           }
-          // Default to video/mp4 for octet-stream (most common from Android video pickers)
-          mimeType = "video/mp4";
+          // Default to .jpg for octet-stream (most common from mobile photo pickers)
+          mimeType = "image/jpeg";
         }
 
         // Generate unique filename
@@ -474,15 +687,22 @@ const app = new Elysia()
   .listen(PORT);
 
 console.log(
-  `🚀 ChainTok backend running at http://${app.server?.hostname}:${app.server?.port}`
+  `ChainTok backend running at http://${app.server?.hostname}:${app.server?.port}`
 );
 console.log(`   Health:     GET  /`);
-console.log(`   Feed:       GET  /feed?sort=latest|hot&limit=20&offset=0`);
-console.log(`   Post:       GET  /post/:pubkey`);
+console.log(`   Feed:       GET  /feed?sort=latest|hot|foryou|following&viewer=WALLET`);
+console.log(`   Post:       GET  /post/:pubkey?viewer=WALLET`);
 console.log(`   Comments:   GET  /post/:pubkey/comments`);
 console.log(`   User Posts: GET  /user/:pubkey/posts`);
-console.log(`   Profile:    GET  /user/:pubkey/profile`);
+console.log(`   Profile:    GET  /user/:pubkey/profile?viewer=WALLET`);
 console.log(`   Profile:    PUT  /user/:pubkey/profile`);
+console.log(`   Follow:     POST /user/:pubkey/follow`);
+console.log(`   Unfollow:   DELETE /user/:pubkey/follow`);
+console.log(`   Followers:  GET  /user/:pubkey/followers`);
+console.log(`   Following:  GET  /user/:pubkey/following`);
+console.log(`   Tip:        POST /tip`);
+console.log(`   Tips:       GET  /user/:pubkey/tips`);
 console.log(`   Webhook:    POST /webhook`);
+console.log(`   Sync:       POST /sync`);
 console.log(`   Upload:     POST /upload`);
 console.log(`   Files:      GET  /uploads/:filename`);
