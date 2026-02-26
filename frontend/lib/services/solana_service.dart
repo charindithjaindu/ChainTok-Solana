@@ -69,6 +69,14 @@ class SolanaService {
     ).pubkey;
   }
 
+  /// [b"follow", follower, following]
+  web3.Pubkey findFollowPda(web3.Pubkey follower, web3.Pubkey following) {
+    return web3.Pubkey.findProgramAddress(
+      [utf8.encode('follow'), follower.toBytes(), following.toBytes()],
+      _programId,
+    ).pubkey;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // ── Transaction builders (return unsigned Transaction) ───────────────
   // ═══════════════════════════════════════════════════════════════════════
@@ -259,6 +267,76 @@ class SolanaService {
     );
 
     return _wrapInTransaction(author, [ix]);
+  }
+
+  /// Build `follow_user` instruction.
+  Future<web3.Transaction> buildFollowUser({
+    required web3.Pubkey follower,
+    required web3.Pubkey following,
+  }) async {
+    final followPda = findFollowPda(follower, following);
+
+    final data = _encodeInstruction('global:follow_user', []);
+
+    final ix = web3.TransactionInstruction(
+      keys: [
+        web3.AccountMeta.signerAndWritable(follower),
+        web3.AccountMeta(following, isSigner: false, isWritable: false),
+        web3.AccountMeta.writable(followPda),
+        web3.AccountMeta(SystemProgram.programId, isSigner: false, isWritable: false),
+      ],
+      programId: _programId,
+      data: data,
+    );
+
+    return _wrapInTransaction(follower, [ix]);
+  }
+
+  /// Build `unfollow_user` instruction.
+  Future<web3.Transaction> buildUnfollowUser({
+    required web3.Pubkey follower,
+    required web3.Pubkey following,
+  }) async {
+    final followPda = findFollowPda(follower, following);
+
+    final data = _encodeInstruction('global:unfollow_user', []);
+
+    final ix = web3.TransactionInstruction(
+      keys: [
+        web3.AccountMeta.signerAndWritable(follower),
+        web3.AccountMeta(following, isSigner: false, isWritable: false),
+        web3.AccountMeta.writable(followPda),
+      ],
+      programId: _programId,
+      data: data,
+    );
+
+    return _wrapInTransaction(follower, [ix]);
+  }
+
+  /// Build `tip_creator` instruction.
+  Future<web3.Transaction> buildTipCreator({
+    required web3.Pubkey tipper,
+    required web3.Pubkey creator,
+    required web3.Pubkey postPubkey,
+    required int amountLamports,
+  }) async {
+    final data = _encodeInstruction('global:tip_creator', [
+      _u64LeBytes(amountLamports),
+    ]);
+
+    final ix = web3.TransactionInstruction(
+      keys: [
+        web3.AccountMeta.signerAndWritable(tipper),
+        web3.AccountMeta.writable(creator),
+        web3.AccountMeta(postPubkey, isSigner: false, isWritable: false),
+        web3.AccountMeta(SystemProgram.programId, isSigner: false, isWritable: false),
+      ],
+      programId: _programId,
+      data: data,
+    );
+
+    return _wrapInTransaction(tipper, [ix]);
   }
 
   // ═══════════════════════════════════════════════════════════════════════

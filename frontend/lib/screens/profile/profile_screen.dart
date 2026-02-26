@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/theme.dart';
 import '../../config/constants.dart';
@@ -35,7 +36,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final api = ApiService();
-      final profile = await api.getProfile(wallet.walletAddress!);
+      final profile = await api.getProfile(
+        wallet.walletAddress!,
+        viewer: wallet.walletAddress,
+      );
       if (mounted) {
         setState(() {
           _profile = profile;
@@ -70,8 +74,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: CustomScrollView(
-        slivers: [
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await _loadProfile();
+          if (mounted) {
+            await context.read<FeedProvider>().loadFeed(refresh: true);
+          }
+        },
+        color: AppTheme.primary,
+        backgroundColor: AppTheme.surface,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          slivers: [
           // ── App bar ─────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
@@ -225,58 +241,107 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       _StatItem(
-                        count: myPosts.length.toString(),
+                        count: _profile?.postCount.toString() ?? myPosts.length.toString(),
                         label: 'Posts',
+                      ),
+                      _StatItem(
+                        count: _formatCount(_profile?.followerCount ?? 0),
+                        label: 'Followers',
+                      ),
+                      _StatItem(
+                        count: _formatCount(_profile?.followingCount ?? 0),
+                        label: 'Following',
                       ),
                       _StatItem(
                         count: _formatCount(totalLikes),
                         label: 'Likes',
                       ),
-                      const _StatItem(
-                        count: '0',
-                        label: 'Followers',
-                      ),
                     ],
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
 
-                  // Edit profile button
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () async {
-                        final profile = _profile ??
-                            UserProfile(
-                              pubkey: '',
-                              authority: wallet.walletAddress ?? '',
-                              displayName: 'Anon',
-                              bio: '',
-                              pfpUri: '',
-                              postCount: 0,
-                              totalLikes: 0,
-                              createdAt: 0,
-                            );
-                        final updated = await Navigator.of(context).push<bool>(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                EditProfileScreen(profile: profile),
-                          ),
-                        );
-                        if (updated == true) {
-                          _loadProfile(); // refresh profile data
-                        }
-                      },
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.textPrimary,
-                        side: const BorderSide(color: AppTheme.divider),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                  // Tips earned
+                  if ((_profile?.totalTips ?? 0) > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFD700).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Text('Edit Profile'),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(FontAwesomeIcons.coins, size: 14, color: Color(0xFFFFD700)),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${_profile!.totalTips.toStringAsFixed(2)} SOL earned',
+                            style: const TextStyle(color: Color(0xFFFFD700), fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
                     ),
+
+                  const SizedBox(height: 16),
+
+                  // Edit profile + Solscan
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final profile = _profile ??
+                                UserProfile(
+                                  pubkey: '',
+                                  authority: wallet.walletAddress ?? '',
+                                  displayName: 'Anon',
+                                  bio: '',
+                                  pfpUri: '',
+                                  postCount: 0,
+                                  totalLikes: 0,
+                                  createdAt: 0,
+                                );
+                            final updated = await Navigator.of(context).push<bool>(
+                              MaterialPageRoute(
+                                builder: (_) => EditProfileScreen(profile: profile),
+                              ),
+                            );
+                            if (updated == true) {
+                              _loadProfile();
+                            }
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.textPrimary,
+                            side: const BorderSide(color: AppTheme.divider),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: const Text('Edit Profile'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed: () {
+                          if (wallet.walletAddress != null) {
+                            final url = Uri.parse(
+                              'https://solscan.io/account/${wallet.walletAddress}?cluster=devnet',
+                            );
+                            launchUrl(url, mode: LaunchMode.externalApplication);
+                          }
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.secondary,
+                          side: const BorderSide(color: AppTheme.divider),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                        ),
+                        child: const Icon(FontAwesomeIcons.arrowUpRightFromSquare, size: 14),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -336,7 +401,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

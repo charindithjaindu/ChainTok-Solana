@@ -9,7 +9,9 @@ import 'services/solana_service.dart';
 import 'services/api_service.dart';
 import 'providers/feed_provider.dart';
 import 'screens/feed/feed_screen.dart';
+import 'screens/discover/discover_screen.dart';
 import 'screens/upload/upload_screen.dart';
+import 'screens/inbox/inbox_screen.dart';
 import 'screens/profile/profile_screen.dart';
 import 'screens/profile/profile_setup_screen.dart';
 import 'screens/wallet/connect_wallet_screen.dart';
@@ -185,9 +187,9 @@ class _AppShellState extends State<AppShell> {
 
   final _screens = const [
     FeedScreen(),
-    SizedBox(), // Discover placeholder
+    DiscoverScreen(),
     UploadScreen(),
-    SizedBox(), // Inbox placeholder
+    InboxScreen(),
     ProfileScreen(),
   ];
 

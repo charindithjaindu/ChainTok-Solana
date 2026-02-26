@@ -6,12 +6,14 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/theme.dart';
 import '../../config/constants.dart';
 import '../../services/wallet_service.dart';
 import '../../services/solana_service.dart';
 import '../../services/api_service.dart';
+import '../../services/cnft_service.dart';
 import '../../providers/feed_provider.dart';
 
 class UploadScreen extends StatefulWidget {
@@ -135,8 +137,11 @@ class _UploadScreenState extends State<UploadScreen> {
       if (mounted) {
         // Refresh the feed after sync
         try {
-          context.read<FeedProvider>().loadFeed();
+          await context.read<FeedProvider>().loadFeed(refresh: true);
         } catch (_) {}
+
+        final caption = _captionController.text.trim();
+        final creatorAddr = wallet.walletAddress ?? '';
 
         setState(() {
           _isUploading = false;
@@ -144,11 +149,13 @@ class _UploadScreenState extends State<UploadScreen> {
           _captionController.clear();
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Post created on-chain! 🚀'),
-            backgroundColor: AppTheme.secondary.withValues(alpha: 0.9),
-          ),
+        // Show cNFT minting dialog
+        _showPostSuccessDialog(
+          context,
+          postPubkey: solana.findPostPda(wallet.pubkey!, postId).toBase58(),
+          arweaveUri: arweaveUri,
+          caption: caption,
+          creatorAddress: creatorAddr,
         );
       }
     } catch (e) {
@@ -162,6 +169,24 @@ class _UploadScreenState extends State<UploadScreen> {
         );
       }
     }
+  }
+
+  void _showPostSuccessDialog(
+    BuildContext context, {
+    required String postPubkey,
+    required String arweaveUri,
+    required String caption,
+    required String creatorAddress,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _PostSuccessDialog(
+        postPubkey: postPubkey,
+        arweaveUri: arweaveUri,
+        caption: caption,
+        creatorAddress: creatorAddress,
+      ),
+    );
   }
 
   @override
@@ -426,6 +451,174 @@ class _PickerCard extends StatelessWidget {
             const Icon(
               Icons.chevron_right,
               color: AppTheme.textSecondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Post Success Dialog — with cNFT minting option
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _PostSuccessDialog extends StatefulWidget {
+  final String postPubkey;
+  final String arweaveUri;
+  final String caption;
+  final String creatorAddress;
+
+  const _PostSuccessDialog({
+    required this.postPubkey,
+    required this.arweaveUri,
+    required this.caption,
+    required this.creatorAddress,
+  });
+
+  @override
+  State<_PostSuccessDialog> createState() => _PostSuccessDialogState();
+}
+
+class _PostSuccessDialogState extends State<_PostSuccessDialog> {
+  bool _isMinting = false;
+  String? _assetId;
+
+  Future<void> _mintCnft() async {
+    setState(() => _isMinting = true);
+    try {
+      final assetId = await CnftService.mintPostAsNft(
+        creatorAddress: widget.creatorAddress,
+        postPubkey: widget.postPubkey,
+        arweaveUri: widget.arweaveUri,
+        caption: widget.caption,
+      );
+      if (mounted) {
+        setState(() => _assetId = assetId);
+        HapticFeedback.heavyImpact();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Minting failed: $e'), backgroundColor: AppTheme.accent),
+        );
+      }
+    }
+    if (mounted) setState(() => _isMinting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppTheme.secondary.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle, color: AppTheme.secondary, size: 40),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Post Created!',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Your video is now live on Solana',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () {
+                final url = Uri.parse(
+                  'https://solscan.io/account/${widget.postPubkey}?cluster=devnet',
+                );
+                launchUrl(url, mode: LaunchMode.externalApplication);
+              },
+              child: const Text(
+                'View on Solscan →',
+                style: TextStyle(color: AppTheme.primary, fontSize: 13, decoration: TextDecoration.underline),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            if (_assetId != null) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(FontAwesomeIcons.gem, color: AppTheme.primary, size: 24),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Minted as cNFT!',
+                      style: TextStyle(color: AppTheme.primary, fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Asset: ${_assetId!.substring(0, 12)}...',
+                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _isMinting ? null : _mintCnft,
+                  icon: _isMinting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(color: AppTheme.primary, strokeWidth: 2),
+                        )
+                      : const Icon(FontAwesomeIcons.gem, size: 14),
+                  label: Text(_isMinting ? 'Minting...' : 'Mint as Compressed NFT'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    side: const BorderSide(color: AppTheme.primary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Own your content as a compressed NFT on Solana',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.surfaceLight,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Done'),
+              ),
             ),
           ],
         ),

@@ -14,6 +14,7 @@ class FeedProvider extends ChangeNotifier {
   bool _hasMore = true;
   String _sort = 'latest';
   String? _error;
+  String? _viewerPubkey;
 
   // ── Demo data for when backend is not running ─────────────────────────
   static final List<Post> _demoPosts = [
@@ -48,7 +49,7 @@ class FeedProvider extends ChangeNotifier {
       pubkey: 'DemoPost4dddddddddddddddddddddddddddddddddd',
       creator: 'NFTCreator4444444444444444444444444444444444444',
       arweaveUri: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-      caption: 'On-chain social media is the future 🚀 No censorship, full ownership',
+      caption: 'On-chain social media is the future No censorship, full ownership',
       likeCount: 512,
       commentCount: 67,
       timestamp: DateTime.now().subtract(const Duration(days: 1)).millisecondsSinceEpoch ~/ 1000,
@@ -72,6 +73,11 @@ class FeedProvider extends ChangeNotifier {
   String get sort => _sort;
   String? get error => _error;
 
+  /// Set the viewer's wallet address for isLiked enrichment.
+  void setViewer(String? pubkey) {
+    _viewerPubkey = pubkey;
+  }
+
   // ── Load feed ──────────────────────────────────────────────────────────
 
   Future<void> loadFeed({bool refresh = false}) async {
@@ -90,6 +96,7 @@ class FeedProvider extends ChangeNotifier {
         sort: _sort,
         limit: AppConstants.feedPageSize,
         offset: _posts.length,
+        viewer: _viewerPubkey,
       );
       _posts = [..._posts, ...newPosts];
       _hasMore = newPosts.length >= AppConstants.feedPageSize;

@@ -23,17 +23,13 @@ class ConnectWalletScreen extends StatelessWidget {
               const Spacer(flex: 2),
 
               // ── Logo ──────────────────────────────────────────────
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.solanaGradient,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: const Icon(
-                  FontAwesomeIcons.play,
-                  color: Colors.white,
-                  size: 40,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  width: 120,
+                  height: 120,
+                  fit: BoxFit.cover,
                 ),
               )
                   .animate()

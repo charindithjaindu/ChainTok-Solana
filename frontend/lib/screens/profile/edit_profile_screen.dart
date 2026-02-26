@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
@@ -26,6 +27,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _bioController;
   bool _isSaving = false;
   String? _error;
+  File? _newAvatarFile;
 
   @override
   void initState() {
@@ -41,7 +43,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
-
+  Future<void> _pickAvatar() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 80,
+    );
+    if (picked != null) {
+      setState(() => _newAvatarFile = File(picked.path));
+    }
+  }
 
   Future<void> _save() async {
     final name = _nameController.text.trim();
@@ -70,14 +83,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final solana = context.read<SolanaService>();
       final api = ApiService();
 
-      // 1. Update profile on-chain (if real wallet)
+      // 1. Upload avatar if changed
+      String pfpUri = widget.profile.pfpUri;
+      if (_newAvatarFile != null) {
+        try {
+          final uploadedPath = await api.uploadProfilePicture(_newAvatarFile!);
+          pfpUri = uploadedPath; // e.g. "/uploads/abc.jpg"
+        } catch (e) {
+          debugPrint('Avatar upload failed: $e');
+        }
+      }
+
+      // 2. Update profile on-chain (if real wallet)
       if (wallet.pubkey != null && wallet.mode == WalletMode.mwa) {
         try {
           final tx = await solana.buildUpdateProfile(
             authority: wallet.pubkey!,
             displayName: name,
             bio: bio,
-            pfpUri: '',
+            pfpUri: pfpUri,
           );
           await wallet.signAndSendTransaction(
             tx,
@@ -96,7 +120,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           wallet.walletAddress!,
           displayName: name,
           bio: bio,
-          pfpUri: '',
+          pfpUri: pfpUri,
         );
       }
 

@@ -18,15 +18,19 @@ class ApiService {
   // ── Feed ───────────────────────────────────────────────────────────────
 
   /// Fetch feed posts from the backend.
-  /// [sort] can be 'latest' or 'hot'.
+  /// [sort] can be 'latest', 'hot', 'foryou', or 'following'.
+  /// [viewer] is the current wallet address to determine isLiked status.
   Future<List<Post>> getFeed({
     String sort = 'latest',
     int limit = 20,
     int offset = 0,
+    String? viewer,
   }) async {
-    final uri = Uri.parse(
-      '$_baseUrl/feed?sort=$sort&limit=$limit&offset=$offset',
-    );
+    var url = '$_baseUrl/feed?sort=$sort&limit=$limit&offset=$offset';
+    if (viewer != null && viewer.isNotEmpty) {
+      url += '&viewer=$viewer';
+    }
+    final uri = Uri.parse(url);
     final response = await _client.get(uri);
     if (response.statusCode != 200) {
       throw ApiException('Failed to load feed: ${response.statusCode}');
@@ -97,9 +101,13 @@ class ApiService {
   // ── User Profile ──────────────────────────────────────────────────────
 
   /// Fetch a user's profile from the backend cache.
-  Future<UserProfile?> getProfile(String walletPubkey) async {
+  Future<UserProfile?> getProfile(String walletPubkey, {String? viewer}) async {
     try {
-      final uri = Uri.parse('$_baseUrl/user/$walletPubkey/profile');
+      var url = '$_baseUrl/user/$walletPubkey/profile';
+      if (viewer != null && viewer.isNotEmpty) {
+        url += '?viewer=$viewer';
+      }
+      final uri = Uri.parse(url);
       final response = await _client.get(uri).timeout(
         const Duration(seconds: 5),
       );
@@ -121,7 +129,10 @@ class ApiService {
     final uri = Uri.parse('$_baseUrl/user/$walletPubkey/profile');
     final response = await _client.put(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'x-wallet-address': walletPubkey,
+      },
       body: jsonEncode({
         'display_name': displayName,
         'bio': bio,
@@ -160,6 +171,82 @@ class ApiService {
   }
 
   // ── Health ─────────────────────────────────────────────────────────────
+
+  // ── Follow / Unfollow ─────────────────────────────────────────────────
+
+  /// Follow a user (backend-level, off-chain for speed).
+  Future<bool> followUser(String followerPubkey, String targetPubkey) async {
+    final uri = Uri.parse('$_baseUrl/user/$targetPubkey/follow');
+    final response = await _client.post(
+      uri,
+      headers: {'x-wallet-address': followerPubkey},
+    );
+    return response.statusCode == 200;
+  }
+
+  /// Unfollow a user.
+  Future<bool> unfollowUser(String followerPubkey, String targetPubkey) async {
+    final uri = Uri.parse('$_baseUrl/user/$targetPubkey/follow');
+    final response = await _client.delete(
+      uri,
+      headers: {'x-wallet-address': followerPubkey},
+    );
+    return response.statusCode == 200;
+  }
+
+  /// Get follower count for a user.
+  Future<int> getFollowerCount(String pubkey) async {
+    final uri = Uri.parse('$_baseUrl/user/$pubkey/followers');
+    final response = await _client.get(uri);
+    if (response.statusCode != 200) return 0;
+    final data = jsonDecode(response.body);
+    return data['count'] as int? ?? 0;
+  }
+
+  /// Get following count for a user.
+  Future<int> getFollowingCount(String pubkey) async {
+    final uri = Uri.parse('$_baseUrl/user/$pubkey/following');
+    final response = await _client.get(uri);
+    if (response.statusCode != 200) return 0;
+    final data = jsonDecode(response.body);
+    return data['count'] as int? ?? 0;
+  }
+
+  // ── Tips ───────────────────────────────────────────────────────────────
+
+  /// Record a tip transaction in backend.
+  Future<bool> recordTip({
+    required String senderPubkey,
+    required String receiverPubkey,
+    required double amountSol,
+    String? postPubkey,
+    String? signature,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/tip');
+    final response = await _client.post(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-wallet-address': senderPubkey,
+      },
+      body: jsonEncode({
+        'receiver': receiverPubkey,
+        'amount_sol': amountSol,
+        if (postPubkey != null) 'post_pubkey': postPubkey,
+        if (signature != null) 'signature': signature,
+      }),
+    );
+    return response.statusCode == 200;
+  }
+
+  /// Get total tips for a user.
+  Future<double> getTotalTips(String pubkey) async {
+    final uri = Uri.parse('$_baseUrl/user/$pubkey/tips');
+    final response = await _client.get(uri);
+    if (response.statusCode != 200) return 0.0;
+    final data = jsonDecode(response.body);
+    return (data['total'] as num?)?.toDouble() ?? 0.0;
+  }
 
   Future<bool> healthCheck() async {
     try {
