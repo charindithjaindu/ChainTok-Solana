@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node
+node_modules/
+
+# Build outputs
+frontend/build/
+soltok/target/
+soltok/test-ledger/
+
+# Data
+backend/data/
+data/
+
+# APK
+*.apk
+
+# Env
+.env
+.env.local
