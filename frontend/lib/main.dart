@@ -9,7 +9,7 @@ import 'services/solana_service.dart';
 import 'services/api_service.dart';
 import 'providers/feed_provider.dart';
 import 'screens/feed/feed_screen.dart';
-import 'screens/discover/discover_screen.dart';
+import 'screens/search/search_screen.dart';
 import 'screens/upload/upload_screen.dart';
 import 'screens/inbox/inbox_screen.dart';
 import 'screens/profile/profile_screen.dart';
@@ -18,6 +18,12 @@ import 'screens/wallet/connect_wallet_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Global error handler
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('[FlutterError] ${details.exception}');
+  };
 
   // Lock to portrait mode (TikTok-style)
   await SystemChrome.setPreferredOrientations([
@@ -114,6 +120,7 @@ class _ProfileGateState extends State<_ProfileGate> {
       // Check backend cache first
       final api = ApiService();
       final profile = await api.getProfile(wallet.walletAddress!);
+      if (!mounted) return;
       if (profile != null && profile.displayName.isNotEmpty && profile.displayName != 'Anon') {
         setState(() {
           _checking = false;
@@ -127,6 +134,7 @@ class _ProfileGateState extends State<_ProfileGate> {
       if (wallet.pubkey != null) {
         final pda = solana.findProfilePda(wallet.pubkey!);
         final exists = await solana.accountExists(pda);
+        if (!mounted) return;
         if (exists) {
           setState(() {
             _checking = false;
@@ -187,7 +195,7 @@ class _AppShellState extends State<AppShell> {
 
   final _screens = const [
     FeedScreen(),
-    DiscoverScreen(),
+    SearchScreen(),
     UploadScreen(),
     InboxScreen(),
     ProfileScreen(),
@@ -222,8 +230,8 @@ class _AppShellState extends State<AppShell> {
                   onTap: () => setState(() => _currentIndex = 0),
                 ),
                 _NavItem(
-                  icon: FontAwesomeIcons.compass,
-                  label: 'Discover',
+                  icon: FontAwesomeIcons.magnifyingGlass,
+                  label: 'Search',
                   isActive: _currentIndex == 1,
                   onTap: () => setState(() => _currentIndex = 1),
                 ),

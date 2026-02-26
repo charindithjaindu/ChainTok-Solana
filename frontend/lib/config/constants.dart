@@ -1,16 +1,25 @@
+import 'dart:io' show Platform;
+
 /// App-wide constants for ChainTok
 class AppConstants {
   AppConstants._();
 
-  // ── Backend ────────────────────────────────────────────────────────────
+  // ── Backend ────────────────────────────────────────────────────────
   /// Base URL of the ElysiaJS indexer backend.
-  /// For Android emulator use 10.0.2.2; for iOS simulator / macOS use 127.0.0.1.
-  static const String apiBaseUrl = 'http://10.0.2.2:3000';
+  /// Auto-detects platform: Android emulator uses 10.0.2.2, others use 127.0.0.1.
+  /// Override with --dart-define=API_BASE_URL=... for custom.
+  static final String apiBaseUrl = const String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: '',
+  ).isNotEmpty
+      ? const String.fromEnvironment('API_BASE_URL')
+      : Platform.isAndroid
+          ? 'http://10.0.2.2:3000'
+          : 'http://127.0.0.1:3000';
 
-  // ── Solana ─────────────────────────────────────────────────────────────
+  // ── Solana ─────────────────────────────────────────────────────────
   /// RPC via backend proxy (avoids emulator DNS issues with devnet).
-  static const String solanaRpcUrl =
-      'http://10.0.2.2:3000/rpc';
+  static final String solanaRpcUrl = '$apiBaseUrl/rpc';
   static const String programId =
       'ArteCcRQqj14sy5BaS7iHDU8EmYURYWFCLh4opB97vS2';
 

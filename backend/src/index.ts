@@ -30,6 +30,8 @@ import {
   recordTip,
   getTotalTips,
   getTipsForUser,
+  searchPosts,
+  searchProfiles,
 } from "./db";
 import { parseWebhookEvents } from "./webhook";
 import type { WebhookPayload } from "./types";
@@ -39,6 +41,8 @@ import { PROGRAM_ID } from "./types";
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const SOLANA_RPC = process.env.SOLANA_RPC ?? "https://api.devnet.solana.com";
 const UPLOADS_DIR = path.resolve(import.meta.dir, "../data/uploads");
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? "";
+const MAX_UPLOAD_SIZE = 100 * 1024 * 1024; // 100 MB
 
 // Ensure uploads directory exists
 await mkdir(UPLOADS_DIR, { recursive: true });
@@ -67,11 +71,21 @@ const app = new Elysia()
   // ── Helius Webhook Receiver ──
   .post(
     "/webhook",
-    ({ body }) => {
+    ({ body, headers, set }) => {
       try {
+        // Verify webhook secret if configured
+        if (WEBHOOK_SECRET) {
+          const authHeader = headers["authorization"] ?? "";
+          if (authHeader !== WEBHOOK_SECRET) {
+            set.status = 401;
+            return { error: "Unauthorized webhook request" };
+          }
+        }
+
         const txs = body as WebhookPayload;
 
         if (!Array.isArray(txs)) {
+          set.status = 400;
           return { error: "Expected array of transactions" };
         }
 
@@ -162,6 +176,7 @@ const app = new Elysia()
         return { ok: true, processed: events.length };
       } catch (err) {
         console.error("[Webhook] Error processing payload:", err);
+        set.status = 500;
         return { ok: false, error: "Failed to process webhook" };
       }
     },
@@ -175,8 +190,8 @@ const app = new Elysia()
     "/feed",
     ({ query }) => {
       const sort = (query.sort ?? "latest") as string;
-      const limit = Math.min(Math.max(parseInt(query.limit ?? "20"), 1), 100);
-      const offset = Math.max(parseInt(query.offset ?? "0"), 0);
+      const limit = Math.min(Math.max(parseInt(query.limit ?? "20") || 20, 1), 100);
+      const offset = Math.max(parseInt(query.offset ?? "0") || 0, 0);
       const viewer = query.viewer ?? "";
 
       let posts: any[];
@@ -455,10 +470,52 @@ const app = new Elysia()
   )
 
   // ── Solana RPC Proxy (for emulator DNS workaround) ──
+  .get(
+    "/search",
+    ({ query, set }) => {
+      const q = (query.q ?? "").trim();
+      if (!q || q.length < 1) {
+        set.status = 400;
+        return { error: "Query parameter 'q' is required" };
+      }
+      const limit = Math.min(Math.max(parseInt(query.limit ?? "20") || 20, 1), 100);
+      const offset = Math.max(parseInt(query.offset ?? "0") || 0, 0);
+
+      const posts = searchPosts(q, limit, offset);
+      const profiles = searchProfiles(q, limit, offset);
+
+      return { posts, profiles };
+    },
+    {
+      query: t.Object({
+        q: t.String(),
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
+      }),
+      detail: { description: "Search posts by caption and profiles by name" },
+    }
+  )
+
+  // ── Solana RPC Proxy ──
   .post(
     "/rpc",
-    async ({ body }) => {
+    async ({ body, set }) => {
       try {
+        // Whitelist allowed RPC methods to prevent abuse
+        const allowedMethods = [
+          "getLatestBlockhash", "getBalance", "getAccountInfo",
+          "getTransaction", "getSignaturesForAddress", "sendTransaction",
+          "simulateTransaction", "getSlot", "getBlockHeight",
+          "getMinimumBalanceForRentExemption", "getFeeForMessage",
+          "getRecentPrioritizationFees",
+        ];
+        const rpcBody = body as any;
+        const method = rpcBody?.method;
+        if (!method || !allowedMethods.includes(method)) {
+          set.status = 403;
+          return { error: `RPC method '${method}' not allowed` };
+        }
+
         const res = await fetch(SOLANA_RPC, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -468,6 +525,7 @@ const app = new Elysia()
         return data;
       } catch (err) {
         console.error("[RPC Proxy] Error:", err);
+        set.status = 502;
         return { error: "RPC proxy failed" };
       }
     },
@@ -593,7 +651,14 @@ const app = new Elysia()
       try {
         const file = (body as any).file;
         if (!file || !(file instanceof Blob)) {
+          set.status = 400;
           return { error: "No file provided" };
+        }
+
+        // Enforce upload size limit
+        if (file.size > MAX_UPLOAD_SIZE) {
+          set.status = 413;
+          return { error: `File too large. Max ${MAX_UPLOAD_SIZE / 1024 / 1024} MB` };
         }
 
         // Determine effective MIME type (Android image_picker often sends application/octet-stream)
@@ -663,8 +728,9 @@ const app = new Elysia()
     "/uploads/:filename",
     async ({ params, set }) => {
       const filepath = path.join(UPLOADS_DIR, params.filename);
-      // Prevent directory traversal
-      if (params.filename.includes("..") || params.filename.includes("/")) {
+      // Prevent directory traversal — resolve and verify prefix
+      const resolved = path.resolve(UPLOADS_DIR, params.filename);
+      if (!resolved.startsWith(UPLOADS_DIR) || params.filename.includes("..") || params.filename.includes("/")) {
         set.status = 400;
         return { error: "Invalid filename" };
       }

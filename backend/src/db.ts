@@ -247,6 +247,21 @@ const getTotalTipsStmt = db.prepare(
   "SELECT COALESCE(SUM(amount_sol), 0) as total FROM tips WHERE receiver = $receiver"
 );
 
+// Search
+const searchPostsStmt = db.prepare(`
+  SELECT * FROM posts
+  WHERE is_deleted = 0 AND caption LIKE $query
+  ORDER BY like_count DESC, timestamp DESC
+  LIMIT $limit OFFSET $offset
+`);
+
+const searchProfilesStmt = db.prepare(`
+  SELECT * FROM profiles
+  WHERE display_name LIKE $query OR authority LIKE $query
+  ORDER BY display_name ASC
+  LIMIT $limit OFFSET $offset
+`);
+
 // ─── Exported Helpers ───────────────────────────────────────────────
 
 export function upsertPost(post: {
@@ -480,6 +495,16 @@ export function getTipsForUser(receiver: string, limit: number, offset: number) 
 export function getTotalTips(receiver: string): number {
   const result = getTotalTipsStmt.get({ $receiver: receiver }) as { total: number };
   return result?.total ?? 0;
+}
+
+// ── Search ──────────────────────────────────────────────────────────
+
+export function searchPosts(query: string, limit: number, offset: number): Post[] {
+  return searchPostsStmt.all({ $query: `%${query}%`, $limit: limit, $offset: offset }) as Post[];
+}
+
+export function searchProfiles(query: string, limit: number, offset: number): Profile[] {
+  return searchProfilesStmt.all({ $query: `%${query}%`, $limit: limit, $offset: offset }) as Profile[];
 }
 
 export default db;

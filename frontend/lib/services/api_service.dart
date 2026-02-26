@@ -170,6 +170,23 @@ class ApiService {
     return data['url'] as String;
   }
 
+  // ── Search ──────────────────────────────────────────────────────────────
+
+  /// Search posts and profiles by query string.
+  Future<Map<String, dynamic>> search(String query, {int limit = 20, int offset = 0}) async {
+    final uri = Uri.parse('$_baseUrl/search').replace(queryParameters: {
+      'q': query,
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    });
+    final response = await _client.get(uri).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) {
+      throw ApiException('Search failed: ${response.statusCode}');
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data;
+  }
+
   // ── Health ─────────────────────────────────────────────────────────────
 
   // ── Follow / Unfollow ─────────────────────────────────────────────────

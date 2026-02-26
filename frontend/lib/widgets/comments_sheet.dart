@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:solana_web3/solana_web3.dart' as web3;
 
 import '../config/theme.dart';
+import '../config/constants.dart';
 import '../models/comment.dart';
 import '../services/api_service.dart';
 import '../services/solana_service.dart';
@@ -91,6 +92,15 @@ class _CommentsSheetState extends State<CommentsSheet> {
   void _postComment() {
     final text = _commentController.text.trim();
     if (text.isEmpty) return;
+    if (text.length > AppConstants.maxCommentLength) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Comment too long (max ${AppConstants.maxCommentLength} chars)'),
+          backgroundColor: AppTheme.accent,
+        ),
+      );
+      return;
+    }
 
     final wallet = context.read<WalletService>();
     final solana = context.read<SolanaService>();
