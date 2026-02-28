@@ -42,7 +42,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const SOLANA_RPC = process.env.SOLANA_RPC ?? "https://api.devnet.solana.com";
 const UPLOADS_DIR = path.resolve(import.meta.dir, "../data/uploads");
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? "";
-const MAX_UPLOAD_SIZE = 100 * 1024 * 1024; // 100 MB
+const MAX_UPLOAD_SIZE = 500 * 1024 * 1024; // 500 MB
 
 // Ensure uploads directory exists
 await mkdir(UPLOADS_DIR, { recursive: true });
@@ -647,7 +647,10 @@ const app = new Elysia()
   // ── File Upload (video / media) ──
   .post(
     "/upload",
-    async ({ body }) => {
+    async ({ body, set }) => {
+      console.log("[Upload] Received upload request");
+      console.log("[Upload] Body keys:", Object.keys(body as any));
+      console.log("[Upload] File:", (body as any).file ? `size=${(body as any).file.size}, type=${(body as any).file.type}, name=${(body as any).file.name}` : "MISSING");
       try {
         const file = (body as any).file;
         if (!file || !(file instanceof Blob)) {
@@ -750,7 +753,10 @@ const app = new Elysia()
   )
 
   // ── Start ──
-  .listen(PORT);
+  .listen({
+    port: PORT,
+    maxRequestBodySize: MAX_UPLOAD_SIZE, // 100 MB
+  });
 
 console.log(
   `ChainTok backend running at http://${app.server?.hostname}:${app.server?.port}`

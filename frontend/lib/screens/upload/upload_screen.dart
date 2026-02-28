@@ -158,7 +158,9 @@ class _UploadScreenState extends State<UploadScreen> {
           creatorAddress: creatorAddr,
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Upload error: $e');
+      debugPrint('Upload stackTrace: $stackTrace');
       if (mounted) {
         setState(() => _isUploading = false);
         ScaffoldMessenger.of(context).showSnackBar(

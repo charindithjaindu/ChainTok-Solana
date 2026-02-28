@@ -71,6 +71,7 @@
 ### Phase 2 — Post-Hackathon (Q2 2026)
 | Feature | Description |
 |---|---|
+| **Tapestry social graph integration** | Migrate profiles, follows, likes, comments, and content to [Tapestry](https://docs.usetapestry.dev/) — a composable on-chain social graph protocol on Solana. Replace our custom SQLite read cache + webhook indexer with Tapestry's managed API (`socialfi` package). This gives us cross-app social graph interoperability (users carry their followers/following across all Tapestry-powered apps), faster onboarding via `findOrCreate` profile imports, and eliminates the need to maintain our own Borsh event parser and indexing infra. Backend becomes a thin proxy that forwards social operations to `api.usetapestry.dev/v1/` with our namespaced API key. |
 | **Arweave / Shadow Drive storage** | Replace local file uploads with decentralized storage |
 | **Compressed NFT posts (Bubblegum)** | Every post auto-minted as cNFT on Merkle tree |
 | **Token-gated content** | Lock posts behind NFT / token ownership |
@@ -84,7 +85,7 @@
 | Feature | Description |
 |---|---|
 | **Livestreaming** | Real-time streaming with on-chain tip rain |
-| **DAO governance** | Community-driven moderation via SPL Governance |
+| **DAO governance via Realms** | Community-driven moderation using [Realms](https://realms.today/) (SPL Governance). Create a ChainTok DAO where token holders vote on content moderation policies, creator verification, platform fee parameters, and feature proposals. Leverage Realms' proposal lifecycle (draft → voting → execution) with on-chain execution of approved governance actions. |
 | **Creator analytics** | Dashboard with views, tips, engagement metrics |
 | **Cross-chain bridge** | Accept tips in USDC, mSOL, or bridged ETH |
 | **Desktop / web app** | Flutter web build + PWA support |
@@ -110,6 +111,7 @@
 5. **Mobile-native** — built with Solana Mobile Stack & MWA for phone-first experience
 6. **Open protocol** — any app can read the on-chain data; no lock-in
 7. **Scalable architecture** — backend is just a cache layer; all truth lives on-chain
+8. **Tapestry-ready** — planned migration to [Tapestry](https://docs.usetapestry.dev/) for composable, cross-app social graph interoperability on Solana
 
 ---
 

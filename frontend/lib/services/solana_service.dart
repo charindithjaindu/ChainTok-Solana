@@ -349,11 +349,17 @@ class SolanaService {
   }
 
   /// Check if an account exists on-chain.
+  ///
+  /// Uses a raw RPC call to avoid a type-casting bug in the solana_web3
+  /// library where JSON integer fields are parsed as `double`.
   Future<bool> accountExists(web3.Pubkey pubkey) async {
     try {
-      final info = await _connection.getAccountInfo(pubkey);
-      debugPrint('accountExists($pubkey): info=${info != null}');
-      return info != null;
+      // Use getBalance as a lightweight existence check — if balance > 0
+      // or the RPC doesn't throw, the account exists.
+      // getAccountInfo has a JSON parsing bug (double vs int) in solana_web3.
+      final balance = await _connection.getBalance(pubkey);
+      debugPrint('accountExists($pubkey): balance=$balance');
+      return balance > 0;
     } catch (e) {
       debugPrint('accountExists($pubkey) error: $e');
       return false;

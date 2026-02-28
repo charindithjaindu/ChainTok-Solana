@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/constants.dart';
 import '../models/post.dart';
@@ -79,23 +80,59 @@ class ApiService {
   /// Upload a video file to the backend and return the URL it's served at.
   /// Returns the URL string on success (e.g. http://10.0.2.2:3000/uploads/abc.mp4).
   Future<String> uploadVideo(File file) async {
+    final fileSize = await file.length();
+    debugPrint('[Upload] Starting upload: ${file.path} (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)');
+
     final uri = Uri.parse('$_baseUrl/upload');
-    final request = http.MultipartRequest('POST', uri);
-    request.files.add(
-      await http.MultipartFile.fromPath('file', file.path),
-    );
-    final streamed = await request.send().timeout(
-      const Duration(minutes: 5),
-    );
-    final response = await http.Response.fromStream(streamed);
-    if (response.statusCode != 200) {
-      throw ApiException('Upload failed: ${response.statusCode}');
+
+    // Use dart:io HttpClient directly for reliable streaming upload
+    final httpClient = HttpClient();
+    try {
+      final ioRequest = await httpClient.openUrl('POST', uri);
+
+      // Build multipart body
+      final boundary = 'dart-http-boundary-${DateTime.now().millisecondsSinceEpoch}';
+      ioRequest.headers.set('Content-Type', 'multipart/form-data; boundary=$boundary');
+
+      final fileName = file.path.split('/').last;
+      final mimeType = fileName.endsWith('.mp4') ? 'video/mp4'
+          : fileName.endsWith('.mov') ? 'video/quicktime'
+          : fileName.endsWith('.webm') ? 'video/webm'
+          : 'application/octet-stream';
+
+      // Pre-build the header and footer to calculate content length
+      final header = '--$boundary\r\n'
+          'Content-Disposition: form-data; name="file"; filename="$fileName"\r\n'
+          'Content-Type: $mimeType\r\n'
+          '\r\n';
+      final footer = '\r\n--$boundary--\r\n';
+
+      final headerBytes = utf8.encode(header);
+      final footerBytes = utf8.encode(footer);
+
+      ioRequest.contentLength = headerBytes.length + fileSize + footerBytes.length;
+
+      // Stream the upload
+      ioRequest.add(headerBytes);
+      await ioRequest.addStream(file.openRead());
+      ioRequest.add(footerBytes);
+
+      final ioResponse = await ioRequest.close();
+      final responseBody = await ioResponse.transform(utf8.decoder).join();
+
+      debugPrint('[Upload] Response: ${ioResponse.statusCode} $responseBody');
+
+      if (ioResponse.statusCode != 200) {
+        throw ApiException('Upload failed: ${ioResponse.statusCode}');
+      }
+      final data = jsonDecode(responseBody);
+      if (data['error'] != null) {
+        throw ApiException('Upload error: ${data['error']}');
+      }
+      return data['url'] as String;
+    } finally {
+      httpClient.close();
     }
-    final data = jsonDecode(response.body);
-    if (data['error'] != null) {
-      throw ApiException('Upload error: ${data['error']}');
-    }
-    return data['url'] as String;
   }
 
   // ── User Profile ──────────────────────────────────────────────────────
@@ -156,7 +193,7 @@ class ApiService {
     request.files.add(
       await http.MultipartFile.fromPath('file', file.path),
     );
-    final streamed = await request.send().timeout(
+    final streamed = await _client.send(request).timeout(
       const Duration(minutes: 2),
     );
     final response = await http.Response.fromStream(streamed);

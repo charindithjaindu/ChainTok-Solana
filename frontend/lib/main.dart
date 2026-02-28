@@ -192,13 +192,14 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
+  final _profileKey = GlobalKey<ProfileScreenState>();
 
-  final _screens = const [
-    FeedScreen(),
-    SearchScreen(),
-    UploadScreen(),
-    InboxScreen(),
-    ProfileScreen(),
+  late final List<Widget> _screens = [
+    const FeedScreen(),
+    const SearchScreen(),
+    const UploadScreen(),
+    const InboxScreen(),
+    ProfileScreen(key: _profileKey),
   ];
 
   @override
@@ -258,7 +259,11 @@ class _AppShellState extends State<AppShell> {
                   icon: FontAwesomeIcons.user,
                   label: 'Profile',
                   isActive: _currentIndex == 4,
-                  onTap: () => setState(() => _currentIndex = 4),
+                  onTap: () {
+                    setState(() => _currentIndex = 4);
+                    // Refresh profile data when switching to profile tab
+                    _profileKey.currentState?.loadAll();
+                  },
                 ),
               ],
             ),

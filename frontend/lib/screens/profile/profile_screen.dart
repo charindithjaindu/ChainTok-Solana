@@ -9,7 +9,6 @@ import '../../config/theme.dart';
 import '../../config/constants.dart';
 import '../../services/wallet_service.dart';
 import '../../services/api_service.dart';
-import '../../providers/feed_provider.dart';
 import '../../models/post.dart';
 import '../../models/user_profile.dart';
 import 'edit_profile_screen.dart';
@@ -18,16 +17,30 @@ class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  State<ProfileScreen> createState() => ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserver {
   UserProfile? _profile;
+  List<Post> _myPosts = [];
+  bool _loadingPosts = false;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    WidgetsBinding.instance.addObserver(this);
+    loadAll();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Reload profile + posts. Call after upload, pull-to-refresh, or tab switch.
+  Future<void> loadAll() async {
+    await Future.wait([_loadProfile(), _loadMyPosts()]);
   }
 
   Future<void> _loadProfile() async {
@@ -50,17 +63,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _loadMyPosts() async {
+    final wallet = context.read<WalletService>();
+    if (wallet.walletAddress == null) return;
+    if (_loadingPosts) return;
+
+    _loadingPosts = true;
+    try {
+      final api = ApiService();
+      // First trigger a sync so backend picks up any recent on-chain posts
+      await api.syncFromChain();
+      final posts = await api.getUserPosts(wallet.walletAddress!);
+      if (mounted) {
+        setState(() => _myPosts = posts);
+      }
+    } catch (e) {
+      debugPrint('Failed to load user posts: $e');
+    } finally {
+      _loadingPosts = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final wallet = context.watch<WalletService>();
-    final feed = context.watch<FeedProvider>();
 
-    // Count "my" posts from feed
-    final myPosts = feed.posts
-        .where((p) =>
-            p.creator == wallet.walletAddress ||
-            wallet.mode == WalletMode.demo)
-        .toList();
+    final myPosts = _myPosts;
     final totalLikes = myPosts.fold<int>(0, (sum, p) => sum + p.likeCount);
 
     final displayName = _profile?.displayName ?? 'Anon';
@@ -76,10 +104,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: AppTheme.background,
       body: RefreshIndicator(
         onRefresh: () async {
-          await _loadProfile();
-          if (mounted) {
-            await context.read<FeedProvider>().loadFeed(refresh: true);
-          }
+          await loadAll();
         },
         color: AppTheme.primary,
         backgroundColor: AppTheme.surface,
